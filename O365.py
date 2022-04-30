@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import requests
 import re
 import pickle
+import os
 from bs4 import BeautifulSoup
 
 
@@ -112,6 +113,9 @@ class Account:
     def save_token(self):
         pickle.dump(self.token, open("oauth.cache", "wb"))
 
+    def clear_cache(self):
+        os.remove("oauth.cache")
+
     def refresh_token(self):
         payload = {
             'client_id': self.client_id,
@@ -137,6 +141,7 @@ class Account:
                 raise TokenInvalidError(error_string)
             else:
                 # Must catch this exception
+                self.clear_cache()
                 raise TokenExpiredError(error_string)
 
     def two_hour_schedule(self):
