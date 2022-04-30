@@ -95,6 +95,7 @@ class Account:
             if self.token.is_expired():
                 self.refresh_token()
         else:
+            # Must catch this exception
             raise ValueError("The scopes is not set. Please define the scopes.")
 
     def load_token(self):
@@ -132,8 +133,10 @@ class Account:
             regex = re.compile(r'\n.*')
             error_string = regex.sub("", auth.json()['error_description'])
             if auth.json()['error_codes'][0] in invalid_codes:
+                # Must catch this exception
                 raise TokenInvalidError(error_string)
             else:
+                # Must catch this exception
                 raise TokenExpiredError(error_string)
 
     def two_hour_schedule(self):
@@ -176,4 +179,3 @@ if __name__ == "__main__":
         "User.Read email"
     ]
     account = Account(scopes = scopes)
-    print(account.token.refresh_token)
