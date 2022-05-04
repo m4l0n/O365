@@ -152,13 +152,13 @@ class Account:
             headers['Authorization'] = f'Bearer {self.token.access_token}'
             events = requests.get(f'{self.graph_api}calendarview?startdatetime={datetime.utcnow() - timedelta(minutes = 1)}'
                                   f'&enddatetime={datetime.utcnow() + timedelta(hours = 2)}', headers = self.headers)
-            if (events.status_code == 200 or events.status_code == '200'):
+            if (events.status_code == 200 or '200'):
                 if len(events.json()['value']) == 0:
                     return "No link found"
                 for event in events.json()['value']:
                     soup = BeautifulSoup(event['body']['content'], "lxml")
                     meeting_url = soup.find('a', class_ = "me-email-headline")['href']
-                    diff = abs(datetime.strptime(event.json()['start']['dateTime'][:-1], "%Y-%m-%dT%H:%M:%S.%f") - datetime.utcnow())
+                    diff = abs(datetime.strptime(event['start']['dateTime'][:-1], "%Y-%m-%dT%H:%M:%S.%f") - datetime.utcnow())
                     if (timedelta(seconds = 0) <= diff <= timedelta(seconds = 20)):
                         return meeting_url
                     else:
@@ -170,7 +170,7 @@ class Account:
                 raise TokenInvalidError("Access token is invalid!")
         except TokenExpiredError:
             self.refresh_token()
-            self.two_hour_schedule()
+            return self.two_hour_schedule()
 
 
 if __name__ == "__main__":
