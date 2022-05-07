@@ -4,6 +4,14 @@ import re
 import pickle
 import os
 from bs4 import BeautifulSoup
+import logging
+import utils
+from getpass import getpass
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 class TokenExpiredError(Exception):
@@ -70,6 +78,7 @@ class Token:
         self.access_token = access_token
         self.expires_in = expires_in
         self.expiration_datetime = None
+        self.refresh_token_expiry = None
 
     def is_expired(self):
         return datetime.now() > self.expiration_datetime if self.expiration_datetime is not None else True
@@ -95,25 +104,34 @@ class Account:
             self.token = self.load_token()
             if self.token.is_expired():
                 self.refresh_token()
+            self.scheduler = AsyncIOScheduler(timezone = "Asia/Kuala_Lumpur")
+            self.scheduler.add_job(self.persist_refresh_token, "interval", hours=1)
+            self.scheduler.start()
         else:
             # Must catch this exception
+            logger.critical("The oauth scopes are not set!")
             raise ValueError("The scopes is not set. Please define the scopes.")
 
     def load_token(self):
         try:
             with open("oauth.cache", 'rb') as f:
                 token = pickle.load(f)
+                logger.debug("Token is loaded from cache file!")
         except (FileNotFoundError, pickle.UnpicklingError):
-            refresh_token = input("Enter a refresh token: ")
+            logger.error("No oauth cache file found!")
+            refresh_token = getpass(prompt = "Enter a refresh token: ")
+            utils.clear_last_input()
             token = Token(refresh_token)
             self.refresh_token()
         finally:
             return token
 
     def save_token(self):
+        logger.debug("Token is saved into cache file!")
         pickle.dump(self.token, open("oauth.cache", "wb"))
 
     def clear_cache(self):
+        logger.debug("Token cache is removed!")
         os.remove("oauth.cache")
 
     def refresh_token(self):
@@ -130,17 +148,20 @@ class Account:
             self.token.refresh_token = auth.json()['refresh_token']
             self.token.expires_in = auth.json()['expires_in']
             self.token.expiration_datetime = self.token.find_expiration_datetime()
+            self.token.refresh_token_expiry = datetime.now() + timedelta(hours = 24)
+            logger.info("Token refreshed!")
             self.save_token()
-            print("Token refreshed!")
         elif auth.status_code == 400:
             invalid_codes = [9002313, 900144]
             regex = re.compile(r'\n.*')
             error_string = regex.sub("", auth.json()['error_description'])
             if auth.json()['error_codes'][0] in invalid_codes:
                 # Must catch this exception
+                logger.error("Refresh token is invalid!")
                 raise TokenInvalidError(error_string)
             else:
                 # Must catch this exception
+                logger.error("Refresh Token Expired!")
                 self.clear_cache()
                 raise TokenExpiredError(error_string)
 
@@ -154,23 +175,37 @@ class Account:
                                   f'&enddatetime={datetime.utcnow() + timedelta(hours = 2)}', headers = self.headers)
             if (events.status_code == 200 or '200'):
                 if len(events.json()['value']) == 0:
+                    logger.info("No meeting URL found!")
                     return "No link found"
                 for event in events.json()['value']:
                     soup = BeautifulSoup(event['body']['content'], "lxml")
                     meeting_url = soup.find('a', class_ = "me-email-headline")['href']
                     diff = abs(datetime.strptime(event['start']['dateTime'][:-1], "%Y-%m-%dT%H:%M:%S.%f") - datetime.utcnow())
                     if (timedelta(seconds = 0) <= diff <= timedelta(seconds = 20)):
+                        logger.info("Meeting URL Found!")
                         return meeting_url
                     else:
+                        logger.info("No meeting URL found!")
                         return "No link found"
             elif (events.status_code == 401):
+                logger.error("Access token has expired!")
                 raise TokenExpiredError("Access token has expired!")
             # Must catch this exception
             elif (events.status_code == 400):
+                logger.error("Access token is invalid!")
                 raise TokenInvalidError("Access token is invalid!")
         except TokenExpiredError:
+            logger.error("Access Token Expired!")
             self.refresh_token()
             return self.two_hour_schedule()
+
+    def persist_refresh_token(self):
+        logger.debug("Checking for refresh token expiry...")
+        if abs(self.token.refresh_token_expiry - datetime.now()) < timedelta(hours = 2):
+            logger.info("Refresh token is expiring. Will be refreshed now.")
+            self.refresh_token()
+        else:
+            logger.debug("Refresh token is still new!")
 
 
 if __name__ == "__main__":
